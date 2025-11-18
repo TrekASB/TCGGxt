@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>MMI Pie Chart</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Workspace API (global TrimbleConnectWorkspace object) -->
+  <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
+
+  <!-- Chart.js for the cake/pie diagram -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    header {
+      padding: 8px 12px;
+      border-bottom: 1px solid #ddd;
+      font-size: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 12px;
+      box-sizing: border-box;
+    }
+    #status {
+      font-size: 13px;
+      margin-bottom: 8px;
+      opacity: 0.8;
+    }
+    #error {
+      color: #b00020;
+      font-size: 13px;
+      margin-top: 4px;
+    }
+    #reloadButton {
+      font-size: 13px;
+      padding: 4px 8px;
+      cursor: pointer;
+    }
+    canvas {
+      max-width: 480px;
+      max-height: 480px;
+      width: 100%;
+      height: auto;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>MMI Pie Chart (01_MMI)</div>
+    <button id="reloadButton">Reload from Viewer</button>
+  </header>
+  <main>
+    <div id="status">Connecting to Trimble Connect…</div>
+    <canvas id="mmiChart"></canvas>
+    <div id="error"></div>
+  </main>
+
+  <script>
+    let API = null;
+    let chart = null;
+
+    async function connectToWorkspace() {
+      // Connect as a 3D Viewer extension
+      API = await TrimbleConnectWorkspace.connect(
+        window.parent,
+        (event, data) => {
+          console.log("TC event:", event, data);
+        },
+        30000
+      );
+      document.getElementById("status").textContent = "Connected. Reading MMI values…";
+    }
+
+    /**
+     * Reads all loaded objects and counts 01_MMI values in Pset AVINOR (or Pset named "01_MMI").
+     */
+    async function getMmiCounts() {
+      if (!API) {
+        throw new Error("API not connected yet.");
+      }
+
+      // Get all objects in loaded models
+      const modelObjectsList = await API.viewer.getObjects();
+      // modelObjectsList: ModelObjects[] => { modelId, objects: ObjectProperties[] }
+
+      const counts = {}; // { value: number }
+
+      for (const modelObjects of modelObjectsList) {
+        const objs = modelObjects.objects || [];
+        for (const obj of objs) {
+          const psets = obj.properties || [];
+
+          // Try Pset "AVINOR" first, then fall back to Pset named "01_MMI"
+          const avinorSet =
+            psets.find(ps => ps.set === "AVINOR") ||
+            psets.find(ps => ps.set === "01_MMI");
+
+          if (!avinorSet || !avinorSet.properties) continue;
+
+          // Find property named "01_MMI"
+          const mmiProp = avinorSet.properties.find(p => p.name === "01_MMI");
+          if (!mmiProp || mmiProp.value === null || mmiProp.value === undefined || mmiProp.value === "") {
+            continue;
+          }
+
+          const val = String(mmiProp.value).trim();
+          if (!val) continue;
+
+          counts[val] = (counts[val] || 0) + 1;
+        }
+      }
+
+      return counts;
+    }
+
+    function renderPieChart(counts) {
+      const ctx = document.getElementById("mmiChart").getContext("2d");
+
+      const labels = Object.keys(counts);
+      const data = labels.map(l => counts[l]);
+
+      if (chart) {
+        chart.destroy();
+      }
+
+      if (labels.length === 0) {
+        document.getElementById("status").textContent =
+          "No 01_MMI values found in the loaded model(s).";
+        return;
+      }
+
+      chart = new Chart(ctx, {
+        type: "pie",
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              data: data
+              // Colors are left for Chart.js defaults to handle
+            }
+          ]
+        },
+        options: {
+          plugins: {
+            legend: {
+              position: "bottom"
+            },
+            tooltip: {
+              callbacks: {
+                label: function (context) {
+                  const label = context.label || "";
+                  const value = context.parsed || 0;
+                  return `${label}: ${value} objekter`;
+                }
+              }
+            }
+          }
+        }
+      });
+
+      document.getElementById("status").textContent =
+        "MMI-fordeling (basert på 01_MMI i AVINOR Pset).";
+    }
+
+    async function loadChart() {
+      const statusEl = document.getElementById("status");
+      const errorEl = document.getElementById("error");
+      errorEl.textContent = "";
+      statusEl.textContent = "Henter objekter og leser 01_MMI…";
+
+      try {
+        const counts = await getMmiCounts();
+        renderPieChart(counts);
+      } catch (err) {
+        console.error(err);
+        errorEl.textContent = "Feil ved lesing av MMI-data: " + err.message;
+        statusEl.textContent = "Kunne ikke oppdatere diagram.";
+      }
+    }
+
+    document.getElementById("reloadButton").addEventListener("click", loadChart);
+
+    (async () => {
+      try {
+        await connectToWorkspace();
+        await loadChart();
+      } catch (err) {
+        console.error(err);
+        document.getElementById("error").textContent =
+          "Klarte ikke å koble til Workspace API: " + err.message;
+        document.getElementById("status").textContent = "Feil.";
+      }
+    })();
+  </script>
+</body>
+</html>
