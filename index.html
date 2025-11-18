@@ -84,10 +84,9 @@
     let chart = null;
 
     // Values we care about
-    // Now includes 350 as well
     const VALID_MMI_VALUES = [100, 200, 300, 350, 400];
 
-    // Color mapping per MMI value
+    // Color mapping per MMI value (used both in chart and in viewer)
     const MMI_COLORS = {
       "100": "rgb(190, 40, 35)",   // 100
       "200": "rgb(230, 150, 55)",  // 200
@@ -103,6 +102,21 @@
         .replace(/[\s\-]+/g, "_"); // spaces & dashes → "_"
     }
 
+    // Parse "rgb(r,g,b)" string → {r,g,b,a}
+    function parseRgbToRgba(rgbString) {
+      if (!rgbString) return null;
+      const match = rgbString
+        .toString()
+        .match(/rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/i);
+      if (!match) return null;
+      return {
+        r: parseInt(match[1], 10),
+        g: parseInt(match[2], 10),
+        b: parseInt(match[3], 10),
+        a: 255
+      };
+    }
+
     async function connectToWorkspace() {
       API = await TrimbleConnectWorkspace.connect(
         window.parent,
@@ -116,23 +130,35 @@
     }
 
     /**
-     * Reads all loaded objects and counts these values:
-     *  - Property name: "01_MMI" (any property set)
-     *  - Values: 100, 200, 300, 350, 400
+     * Reads all loaded objects and returns:
+     *  - counts: number per MMI value
+     *  - selectionByMmi: { MMI → { modelId → [runtimeIds] } }
+     *
+     * Property name: "01_MMI" (any property set)
+     * Values: 100, 200, 300, 350, 400
      */
-    async function getMmiCounts() {
+    async function getMmiData() {
       if (!API) throw new Error("API not connected yet.");
 
       const modelObjectsList = await API.viewer.getObjects();
       console.log("getObjects() →", modelObjectsList);
 
-      // Initialize counts for fixed values so they always exist
+      // Initialize counts
       const counts = {
         100: 0,
         200: 0,
         300: 0,
         350: 0,
         400: 0
+      };
+
+      // For coloring: for each MMI we store modelId → [runtimeIds]
+      const selectionByMmi = {
+        100: {},
+        200: {},
+        300: {},
+        350: {},
+        400: {}
       };
 
       for (const modelObjects of modelObjectsList) {
@@ -154,8 +180,10 @@
 
         for (const obj of objectPropsArray) {
           const psets = obj.properties || [];
+          let handled = false;
 
           for (const pset of psets) {
+            if (handled) break;
             const props = pset.properties || [];
             for (const p of props) {
               const propName = p.name || "";
@@ -163,10 +191,17 @@
               // Look for property "01_MMI" (normalised)
               if (normalizeName(propName) !== "01_MMI") continue;
 
-              // Read numeric value and count only defined MMI values
               const numVal = parseInt(p.value, 10);
               if (VALID_MMI_VALUES.includes(numVal)) {
                 counts[numVal] = (counts[numVal] || 0) + 1;
+
+                const perModel = selectionByMmi[numVal];
+                if (!perModel[modelId]) {
+                  perModel[modelId] = [];
+                }
+                perModel[modelId].push(obj.id); // runtimeId
+                handled = true;
+                break; // stop after first 01_MMI on this object
               }
             }
           }
@@ -174,7 +209,57 @@
       }
 
       console.log("MMI counts:", counts);
-      return counts;
+      console.log("MMI selection:", selectionByMmi);
+      return { counts, selectionByMmi };
+    }
+
+    // Color objects in the viewer according to their MMI value
+    async function applyMmiColors(selectionByMmi) {
+      if (!API) throw new Error("API not connected yet.");
+
+      const statusEl = document.getElementById("status");
+      statusEl.textContent = "Oppdaterer farger i modellen…";
+
+      try {
+        // Reset previous colors on all loaded objects
+        await API.viewer.setObjectState(undefined, { color: "reset" });
+
+        // Apply color per MMI group
+        for (const mmi of VALID_MMI_VALUES) {
+          const perModel = selectionByMmi[mmi];
+          if (!perModel) continue;
+
+          const modelObjectIds = [];
+          for (const modelId of Object.keys(perModel)) {
+            const ids = perModel[modelId];
+            if (ids && ids.length) {
+              modelObjectIds.push({
+                modelId,
+                objectRuntimeIds: ids
+              });
+            }
+          }
+
+          if (!modelObjectIds.length) continue;
+
+          const colorString = MMI_COLORS[String(mmi)];
+          const rgba = parseRgbToRgba(colorString);
+          if (!rgba) continue;
+
+          const selector = { modelObjectIds };
+
+          await API.viewer.setObjectState(selector, {
+            color: rgba
+          });
+        }
+
+        statusEl.textContent =
+          "MMI-fordeling og farger er oppdatert i modellen.";
+      } catch (err) {
+        console.error("Feil ved fargelegging:", err);
+        document.getElementById("error").textContent =
+          "Feil ved fargelegging av objekter: " + (err.message || err);
+      }
     }
 
     function renderPieChart(counts) {
@@ -244,13 +329,15 @@
         "Henter objekter og leser 01_MMI (100/200/300/350/400)…";
 
       try {
-        const counts = await getMmiCounts();
+        const { counts, selectionByMmi } = await getMmiData();
         renderPieChart(counts);
+        // After chart is rendered, color the objects in the viewer
+        await applyMmiColors(selectionByMmi);
       } catch (err) {
         console.error(err);
         errorEl.textContent =
           "Feil ved lesing av MMI-data: " + (err.message || err);
-        statusEl.textContent = "Kunne ikke oppdatere diagram.";
+        statusEl.textContent = "Kunne ikke oppdatere diagram og farger.";
       }
     }
 
@@ -272,4 +359,3 @@
   </script>
 </body>
 </html>
-
