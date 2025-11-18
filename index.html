@@ -84,7 +84,17 @@
     let chart = null;
 
     // Values we care about
-    const VALID_MMI_VALUES = [100, 200, 300, 400];
+    // Now includes 350 as well
+    const VALID_MMI_VALUES = [100, 200, 300, 350, 400];
+
+    // Color mapping per MMI value
+    const MMI_COLORS = {
+      "100": "rgb(190, 40, 35)",   // 100
+      "200": "rgb(230, 150, 55)",  // 200
+      "300": "rgb(250, 240, 80)",  // 300
+      "350": "rgb(185, 175, 60)",  // 350
+      "400": "rgb(55, 130, 70)"    // 400
+    };
 
     function normalizeName(name) {
       return (name || "")
@@ -106,9 +116,9 @@
     }
 
     /**
-     * Reads all loaded objects and counts ONLY these values:
+     * Reads all loaded objects and counts these values:
      *  - Property name: "01_MMI" (any property set)
-     *  - Values: 100, 200, 300, 400
+     *  - Values: 100, 200, 300, 350, 400
      */
     async function getMmiCounts() {
       if (!API) throw new Error("API not connected yet.");
@@ -121,6 +131,7 @@
         100: 0,
         200: 0,
         300: 0,
+        350: 0,
         400: 0
       };
 
@@ -152,7 +163,7 @@
               // Look for property "01_MMI" (normalised)
               if (normalizeName(propName) !== "01_MMI") continue;
 
-              // Read numeric value and count only 100 / 200 / 300 / 400
+              // Read numeric value and count only defined MMI values
               const numVal = parseInt(p.value, 10);
               if (VALID_MMI_VALUES.includes(numVal)) {
                 counts[numVal] = (counts[numVal] || 0) + 1;
@@ -162,7 +173,7 @@
         }
       }
 
-      console.log("MMI counts (100/200/300/400):", counts);
+      console.log("MMI counts:", counts);
       return counts;
     }
 
@@ -171,90 +182,12 @@
 
       const labels = [];
       const data = [];
+      const backgroundColors = [];
 
       // Only include slices with count > 0
       for (const mmi of VALID_MMI_VALUES) {
         const c = counts[mmi] || 0;
         if (c > 0) {
-          labels.push(String(mmi));
-          data.push(c);
-        }
-      }
-
-      if (chart) chart.destroy();
-
-      if (labels.length === 0) {
-        document.getElementById("status").textContent =
-          "Fant ingen verdier 100/200/300/400 for 01_MMI på de lastede modellene.";
-        return;
-      }
-
-      chart = new Chart(ctx, {
-        type: "pie",
-        data: {
-          labels,
-          datasets: [
-            {
-              data
-              // Chart.js default colours
-            }
-          ]
-        },
-        options: {
-          plugins: {
-            legend: {
-              position: "bottom"
-            },
-            tooltip: {
-              callbacks: {
-                label: function (context) {
-                  const label = context.label || "";
-                  const value = context.parsed || 0;
-                  return `${label}: ${value} objekter`;
-                }
-              }
-            }
-          }
-        }
-      });
-
-      document.getElementById("status").textContent =
-        "MMI-fordeling (100/200/300/400) basert på 01_MMI.";
-    }
-
-    async function loadChart() {
-      const statusEl = document.getElementById("status");
-      const errorEl = document.getElementById("error");
-      errorEl.textContent = "";
-      statusEl.textContent =
-        "Henter objekter og leser 01_MMI (100/200/300/400)…";
-
-      try {
-        const counts = await getMmiCounts();
-        renderPieChart(counts);
-      } catch (err) {
-        console.error(err);
-        errorEl.textContent =
-          "Feil ved lesing av MMI-data: " + (err.message || err);
-        statusEl.textContent = "Kunne ikke oppdatere diagram.";
-      }
-    }
-
-    document
-      .getElementById("reloadButton")
-      .addEventListener("click", loadChart);
-
-    (async () => {
-      try {
-        await connectToWorkspace();
-        await loadChart();
-      } catch (err) {
-        console.error(err);
-        document.getElementById("error").textContent =
-          "Klarte ikke å koble til Workspace API: " + (err.message || err);
-        document.getElementById("status").textContent = "Feil.";
-      }
-    })();
-  </script>
-</body>
-</html>
+          const label = String(mmi);
+          labels.push(label);
+          dat
