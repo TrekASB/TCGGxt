@@ -62,7 +62,7 @@
 </head>
 <body>
   <header>
-    <div>MMI Pie Chart (01_ MMI fra MMI_AVINOR)</div>
+    <div>MMI Pie Chart (01_MMI fra MMI_AVINOR)</div>
     <button id="reloadButton">Reload from Viewer</button>
   </header>
   <main>
@@ -90,7 +90,7 @@
     /**
      * Reads all loaded objects and counts values of property
      *  - Property set name: "MMI_AVINOR"
-     *  - Property name: "01_ MMI" (may appear as "01_MMI" → we normalize spaces)
+     *  - Property name: "01_MMI" (may appear as "01_MMI" → we normalize spaces)
      */
     async function getMmiCounts() {
       if (!API) {
@@ -112,7 +112,7 @@
           const mmiSet = psets.find(ps => ps.set === "MMI_AVINOR");
           if (!mmiSet || !mmiSet.properties) continue;
 
-          // Find property where name is "01_ MMI" or "01_MMI" (ignore spaces)
+          // Find property where name is "01_MMI" or "01_MMI" (ignore spaces)
           const mmiProp = mmiSet.properties.find(p => {
             const normalized = (p.name || "").replace(/\s+/g, "");
             return normalized === "01_MMI";
@@ -150,7 +150,7 @@
 
       if (labels.length === 0) {
         document.getElementById("status").textContent =
-          "Fant ingen verdier for 01_ MMI i MMI_AVINOR på de lastede modellene.";
+          "Fant ingen verdier for 01_MMI i MMI_AVINOR på de lastede modellene.";
         return;
       }
 
@@ -184,7 +184,7 @@
       });
 
       document.getElementById("status").textContent =
-        "MMI-fordeling basert på 01_ MMI i MMI_AVINOR.";
+        "MMI-fordeling basert på 01_MMI i MMI_AVINOR.";
     }
 
     async function loadChart() {
@@ -192,7 +192,7 @@
       const errorEl = document.getElementById("error");
       errorEl.textContent = "";
       statusEl.textContent =
-        "Henter objekter og leser 01_ MMI fra MMI_AVINOR…";
+        "Henter objekter og leser 01_MMI fra MMI_AVINOR…";
 
       try {
         const counts = await getMmiCounts();
