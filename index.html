@@ -8,7 +8,7 @@
   <!-- Workspace API (global TrimbleConnectWorkspace object) -->
   <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
 
-  <!-- Chart.js for the cake/pie diagram -->
+  <!-- Chart.js for the pie (cake) diagram -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
   <style>
@@ -62,7 +62,7 @@
 </head>
 <body>
   <header>
-    <div>MMI Pie Chart (01_MMI fra MMI_AVINOR)</div>
+    <div>MMI Pie Chart (01_ MMI fra MMI_AVINOR)</div>
     <button id="reloadButton">Reload from Viewer</button>
   </header>
   <main>
@@ -76,7 +76,6 @@
     let chart = null;
 
     async function connectToWorkspace() {
-      // Connect as a 3D Viewer extension
       API = await TrimbleConnectWorkspace.connect(
         window.parent,
         (event, data) => {
@@ -84,19 +83,24 @@
         },
         30000
       );
-      document.getElementById("status").textContent = "Connected. Reading MMI values…";
+      document.getElementById("status").textContent =
+        "Connected. Reading MMI values…";
     }
 
     /**
-     * Reads all loaded objects and counts 01_MMI values
-     * in property set "MMI_AVINOR".
+     * Reads all loaded objects and counts values of property
+     *  - Property set name: "MMI_AVINOR"
+     *  - Property name: "01_ MMI" (may appear as "01_MMI" → we normalize spaces)
      */
     async function getMmiCounts() {
       if (!API) {
         throw new Error("API not connected yet.");
       }
 
+      // Get all objects from all loaded models
       const modelObjectsList = await API.viewer.getObjects();
+      console.log("getObjects() result:", modelObjectsList);
+
       const counts = {}; // { value: number }
 
       for (const modelObjects of modelObjectsList) {
@@ -104,13 +108,22 @@
         for (const obj of objs) {
           const psets = obj.properties || [];
 
-          // 🔹 NOW: look specifically for Pset "MMI_AVINOR"
+          // Find Pset "MMI_AVINOR"
           const mmiSet = psets.find(ps => ps.set === "MMI_AVINOR");
           if (!mmiSet || !mmiSet.properties) continue;
 
-          // Property is "01_MMI"
-          const mmiProp = mmiSet.properties.find(p => p.name === "01_MMI");
-          if (!mmiProp || mmiProp.value === null || mmiProp.value === undefined || mmiProp.value === "") {
+          // Find property where name is "01_ MMI" or "01_MMI" (ignore spaces)
+          const mmiProp = mmiSet.properties.find(p => {
+            const normalized = (p.name || "").replace(/\s+/g, "");
+            return normalized === "01_MMI";
+          });
+
+          if (
+            !mmiProp ||
+            mmiProp.value === null ||
+            mmiProp.value === undefined ||
+            mmiProp.value === ""
+          ) {
             continue;
           }
 
@@ -121,6 +134,7 @@
         }
       }
 
+      console.log("MMI counts:", counts);
       return counts;
     }
 
@@ -136,7 +150,7 @@
 
       if (labels.length === 0) {
         document.getElementById("status").textContent =
-          "No 01_MMI values found in MMI_AVINOR on the loaded model(s).";
+          "Fant ingen verdier for 01_ MMI i MMI_AVINOR på de lastede modellene.";
         return;
       }
 
@@ -147,7 +161,7 @@
           datasets: [
             {
               data: data
-              // Let Chart.js pick default colours
+              // default Chart.js colours
             }
           ]
         },
@@ -170,14 +184,15 @@
       });
 
       document.getElementById("status").textContent =
-        "MMI-fordeling basert på 01_MMI i MMI_AVINOR.";
+        "MMI-fordeling basert på 01_ MMI i MMI_AVINOR.";
     }
 
     async function loadChart() {
       const statusEl = document.getElementById("status");
       const errorEl = document.getElementById("error");
       errorEl.textContent = "";
-      statusEl.textContent = "Henter objekter og leser 01_MMI fra MMI_AVINOR…";
+      statusEl.textContent =
+        "Henter objekter og leser 01_ MMI fra MMI_AVINOR…";
 
       try {
         const counts = await getMmiCounts();
@@ -189,7 +204,9 @@
       }
     }
 
-    document.getElementById("reloadButton").addEventListener("click", loadChart);
+    document
+      .getElementById("reloadButton")
+      .addEventListener("click", loadChart);
 
     (async () => {
       try {
