@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>MMI Objekt Status</title>
+  <title>MMI Pie Chart</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <!-- Workspace API -->
@@ -190,5 +190,85 @@
         if (c > 0) {
           const label = String(mmi);
           labels.push(label);
-          dat
+          data.push(c);
+          backgroundColors.push(MMI_COLORS[label] || "rgba(0,0,0,0.1)");
+        }
+      }
 
+      if (chart) chart.destroy();
+
+      if (labels.length === 0) {
+        document.getElementById("status").textContent =
+          "Fant ingen verdier 100/200/300/350/400 for 01_MMI på de lastede modellene.";
+        return;
+      }
+
+      chart = new Chart(ctx, {
+        type: "pie",
+        data: {
+          labels,
+          datasets: [
+            {
+              data,
+              backgroundColor: backgroundColors
+            }
+          ]
+        },
+        options: {
+          plugins: {
+            legend: {
+              position: "bottom"
+            },
+            tooltip: {
+              callbacks: {
+                label: function (context) {
+                  const label = context.label || "";
+                  const value = context.parsed || 0;
+                  return `${label}: ${value} objekter`;
+                }
+              }
+            }
+          }
+        }
+      });
+
+      document.getElementById("status").textContent =
+        "MMI-fordeling (100/200/300/350/400) basert på 01_MMI.";
+    }
+
+    async function loadChart() {
+      const statusEl = document.getElementById("status");
+      const errorEl = document.getElementById("error");
+      errorEl.textContent = "";
+      statusEl.textContent =
+        "Henter objekter og leser 01_MMI (100/200/300/350/400)…";
+
+      try {
+        const counts = await getMmiCounts();
+        renderPieChart(counts);
+      } catch (err) {
+        console.error(err);
+        errorEl.textContent =
+          "Feil ved lesing av MMI-data: " + (err.message || err);
+        statusEl.textContent = "Kunne ikke oppdatere diagram.";
+      }
+    }
+
+    document
+      .getElementById("reloadButton")
+      .addEventListener("click", loadChart);
+
+    (async () => {
+      try {
+        await connectToWorkspace();
+        await loadChart();
+      } catch (err) {
+        console.error(err);
+        document.getElementById("error").textContent =
+          "Klarte ikke å koble til Workspace API: " + (err.message || err);
+        document.getElementById("status").textContent = "Feil.";
+      }
+    })();
+  </script>
+</body>
+</html>
