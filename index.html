@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>MMI Edin-Pie Chart</title>
+  <title>MMI Pie Chart</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <!-- Workspace API -->
@@ -32,25 +32,31 @@
       flex: 1;
       display: flex;
       flex-direction: column;
-      align-items: center;
-      justify-content: center;
+      align-items: stretch;
+      justify-content: flex-start;
       padding: 12px;
       box-sizing: border-box;
+      gap: 8px;
     }
     #status {
       font-size: 13px;
-      margin-bottom: 8px;
-      opacity: 0.8;
+      opacity: 0.9;
     }
     #error {
       color: #b00020;
       font-size: 13px;
-      margin-top: 4px;
     }
     #reloadButton {
       font-size: 13px;
       padding: 4px 8px;
       cursor: pointer;
+    }
+    #chartContainer {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 200px;
     }
     canvas {
       max-width: 480px;
@@ -58,25 +64,51 @@
       width: 100%;
       height: auto;
     }
+    details {
+      font-size: 12px;
+      border-top: 1px solid #eee;
+      padding-top: 4px;
+    }
+    details summary {
+      cursor: pointer;
+      font-weight: 500;
+    }
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin: 4px 0 0 0;
+    }
   </style>
 </head>
 <body>
   <header>
-    <div>MMI Edin-Pie Chart (01_MMI fra MMI_AVINOR)</div>
+    <div>MMI Pie Chart (01_MMI fra MMI_AVINOR)</div>
     <button id="reloadButton">Reload from Viewer</button>
   </header>
   <main>
     <div id="status">Connecting to Trimble Connect…</div>
-    <canvas id="mmiChart"></canvas>
+    <div id="chartContainer">
+      <canvas id="mmiChart"></canvas>
+    </div>
     <div id="error"></div>
+    <details>
+      <summary>Debug (MMI property sets / properties)</summary>
+      <pre id="debug"></pre>
+    </details>
   </main>
 
   <script>
     let API = null;
     let chart = null;
 
+    function normalizeName(name) {
+      return (name || "")
+        .toString()
+        .toUpperCase()
+        .replace(/[\s\-]+/g, "_"); // spaces & dashes → _
+    }
+
     async function connectToWorkspace() {
-      // Connect as a 3D Viewer extension
       API = await TrimbleConnectWorkspace.connect(
         window.parent,
         (event, data) => {
@@ -89,86 +121,123 @@
     }
 
     /**
-     * Get a map of MMI values from all loaded objects:
-     * - Property set: "MMI_AVINOR"
-     * - Property name: "01_MMI" (we trim spaces just in case)
+     * Reads all loaded objects and counts values of:
+     *  - Property set: name contains "MMI_AVINOR" (normalized)
+     *  - Property name: normalized name === "01_MMI"
      */
     async function getMmiCounts() {
-      if (!API) {
-        throw new Error("API not connected yet.");
-      }
+      if (!API) throw new Error("API not connected yet.");
+
+      const debugLines = [];
+      const debugSets = new Set();
+      const debugProps = new Set();
 
       const modelObjectsList = await API.viewer.getObjects();
-      console.log("getObjects result:", modelObjectsList);
+      console.log("getObjects() →", modelObjectsList);
 
-      const counts = {}; // { value: number }
+      const counts = {};
 
-      // For each model, fetch full properties using getObjectProperties
       for (const modelObjects of modelObjectsList) {
-        const modelId = modelObjects.modelId || modelObjects.modelid || modelObjects["model Id"];
+        const modelId =
+          modelObjects.modelId ||
+          modelObjects.modelid ||
+          modelObjects["model Id"];
         const objs = modelObjects.objects || [];
 
-        if (!modelId || objs.length === 0) continue;
+        if (!modelId || !objs.length) continue;
 
         const runtimeIds = objs.map(o => o.id);
-        if (runtimeIds.length === 0) continue;
+        if (!runtimeIds.length) continue;
 
-        const objectProps = await API.viewer.getObjectProperties(modelId, runtimeIds);
-        console.log("getObjectProperties for model", modelId, objectProps);
+        const objectPropsArray = await API.viewer.getObjectProperties(
+          modelId,
+          runtimeIds
+        );
 
-        for (const obj of objectProps) {
+        for (const obj of objectPropsArray) {
           const psets = obj.properties || [];
 
-          // Find Pset "MMI_AVINOR"
-          const mmiSet = psets.find(ps => ps.set === "MMI_AVINOR");
-          if (!mmiSet || !mmiSet.properties) continue;
+          for (const pset of psets) {
+            const rawSetName = pset.set || "";
+            const nSet = normalizeName(rawSetName);
 
-          // Find property "01_MMI" (normalize spaces in the name just in case)
-          const mmiProp = mmiSet.properties.find(p => {
-            const normalized = (p.name || "").replace(/\s+/g, "");
-            return normalized === "01_MMI";
-          });
+            // collect debug of any set that contains 'MMI'
+            if (nSet.includes("MMI")) {
+              debugSets.add(rawSetName);
+            }
 
-          if (!mmiProp || mmiProp.value === null || mmiProp.value === undefined || mmiProp.value === "") {
-            continue;
+            // we only care about sets that look like MMI_AVINOR
+            if (!nSet.includes("MMI_AVINOR")) continue;
+
+            const props = pset.properties || [];
+            for (const p of props) {
+              const rawPropName = p.name || "";
+              const nProp = normalizeName(rawPropName);
+
+              // debug any prop that contains 'MMI'
+              if (nProp.includes("MMI")) {
+                debugProps.add(`${rawSetName} :: ${rawPropName}`);
+              }
+
+              // our target property
+              if (nProp === "01_MMI") {
+                const val = (p.value ?? "").toString().trim();
+                if (!val) continue;
+                counts[val] = (counts[val] || 0) + 1;
+              }
+            }
           }
-
-          const val = String(mmiProp.value).trim();
-          if (!val) continue;
-
-          // Count the value (100, 200, 300, 400, ...)
-          counts[val] = (counts[val] || 0) + 1;
         }
       }
 
+      // Write debug info
+      debugLines.push("Property sets containing 'MMI':");
+      if (debugSets.size === 0) {
+        debugLines.push("  (none found)");
+      } else {
+        for (const s of debugSets) debugLines.push("  - " + s);
+      }
+
+      debugLines.push("\nProperties containing 'MMI':");
+      if (debugProps.size === 0) {
+        debugLines.push("  (none found)");
+      } else {
+        let i = 0;
+        for (const p of debugProps) {
+          debugLines.push("  - " + p);
+          if (++i >= 40) { // don't spam too much
+            debugLines.push("  ... (truncated)");
+            break;
+          }
+        }
+      }
+
+      document.getElementById("debug").textContent = debugLines.join("\n");
       console.log("MMI counts:", counts);
       return counts;
     }
 
     function renderPieChart(counts) {
       const ctx = document.getElementById("mmiChart").getContext("2d");
-
       const labels = Object.keys(counts);
       const data = labels.map(l => counts[l]);
 
-      if (chart) {
-        chart.destroy();
-      }
+      if (chart) chart.destroy();
 
       if (labels.length === 0) {
         document.getElementById("status").textContent =
-          "FEIL__FEIL__Fant ingen verdier for 01_MMI i MMI_AVINOR på de lastede modellene.";
+          "Fant ingen verdier for 01_MMI i MMI_AVINOR på de lastede modellene.";
         return;
       }
 
       chart = new Chart(ctx, {
         type: "pie",
         data: {
-          labels: labels,
+          labels,
           datasets: [
             {
-              data: data
-              // Let Chart.js choose default colours
+              data
+              // default Chart.js colors
             }
           ]
         },
@@ -198,20 +267,22 @@
       const statusEl = document.getElementById("status");
       const errorEl = document.getElementById("error");
       errorEl.textContent = "";
-      statusEl.textContent =
-        "Henter objekter og leser 01_MMI fra MMI_AVINOR…";
+      statusEl.textContent = "Henter objekter og leser 01_MMI fra MMI_AVINOR…";
 
       try {
         const counts = await getMmiCounts();
         renderPieChart(counts);
       } catch (err) {
         console.error(err);
-        errorEl.textContent = "Feil ved lesing av MMI-data: " + (err.message || err);
+        errorEl.textContent =
+          "Feil ved lesing av MMI-data: " + (err.message || err);
         statusEl.textContent = "Kunne ikke oppdatere diagram.";
       }
     }
 
-    document.getElementById("reloadButton").addEventListener("click", loadChart);
+    document
+      .getElementById("reloadButton")
+      .addEventListener("click", loadChart);
 
     (async () => {
       try {
@@ -227,6 +298,3 @@
   </script>
 </body>
 </html>
-
-
-
