@@ -79,7 +79,7 @@
 </head>
 <body>
   <header>
-    <div class="title">MMI-kakediagram</div>
+    <div class="title">MMI-kakediagram (01_MMI)</div>
     <button id="reloadButton">Hent fra modell</button>
     <button id="colorizeButton">Fargelegg objekter</button>
   </header>
@@ -147,7 +147,7 @@
      *  - counts: antall objekter per MMI-verdi
      *  - selectionByMmi: { MMI → { modelId → [runtimeIds] } }
      *
-     * Ser etter egenskap med navn "MMI_AVINOR-->01_MMI" i valgfritt Pset.
+     * Ser etter egenskap med navn "01_MMI" i valgfritt Pset.
      */
     async function getMmiData() {
       if (!API) throw new Error("API ikke tilkoblet.");
@@ -356,7 +356,8 @@
       });
 
       document.getElementById("status").textContent =
-        "MMI-fordeling (100/200/300/350/400) basert på 01_MMI.";
+        "MMI-fordeling (100/200/300/350/400) basert på 01_MMI. " +
+        "Bruk «Fargelegg objekter» for å oppdatere farger i modellen.";
     }
 
     async function loadChart() {
@@ -364,19 +365,19 @@
       const errorEl = document.getElementById("error");
       errorEl.textContent = "";
       statusEl.textContent =
-        "Henter MMI verdi på ojektnivå…";
+        "Henter objekter og leser 01_MMI (100/200/300/350/400)…";
 
       try {
         const { counts, selectionByMmi } = await getMmiData();
         lastSelectionByMmi = selectionByMmi; // lagre for "Fargelegg objekter"
 
+        // Kun oppdatere diagrammet her – ingen farger i modellen ennå
         renderPieChart(counts);
-        await applyMmiColors(selectionByMmi);
       } catch (err) {
         console.error(err);
         errorEl.textContent =
           "Feil ved lesing av MMI-data: " + (err.message || err);
-        statusEl.textContent = "Kunne ikke oppdatere diagram og farger.";
+        statusEl.textContent = "Kunne ikke oppdatere diagram.";
       }
     }
 
