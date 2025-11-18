@@ -5,10 +5,10 @@
   <title>MMI Pie Chart</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-  <!-- Workspace API (global TrimbleConnectWorkspace object) -->
+  <!-- Workspace API -->
   <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
 
-  <!-- Chart.js for the pie (cake) diagram -->
+  <!-- Chart.js for the pie chart -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
   <style>
@@ -76,6 +76,7 @@
     let chart = null;
 
     async function connectToWorkspace() {
+      // Connect as a 3D Viewer extension
       API = await TrimbleConnectWorkspace.connect(
         window.parent,
         (event, data) => {
@@ -88,48 +89,54 @@
     }
 
     /**
-     * Reads all loaded objects and counts values of property
-     *  - Property set name: "MMI_AVINOR"
-     *  - Property name: "01_MMI" (may appear as "01_MMI" → we normalize spaces)
+     * Get a map of MMI values from all loaded objects:
+     * - Property set: "MMI_AVINOR"
+     * - Property name: "01_MMI" (we trim spaces just in case)
      */
     async function getMmiCounts() {
       if (!API) {
         throw new Error("API not connected yet.");
       }
 
-      // Get all objects from all loaded models
       const modelObjectsList = await API.viewer.getObjects();
-      console.log("getObjects() result:", modelObjectsList);
+      console.log("getObjects result:", modelObjectsList);
 
       const counts = {}; // { value: number }
 
+      // For each model, fetch full properties using getObjectProperties
       for (const modelObjects of modelObjectsList) {
+        const modelId = modelObjects.modelId || modelObjects.modelid || modelObjects["model Id"];
         const objs = modelObjects.objects || [];
-        for (const obj of objs) {
+
+        if (!modelId || objs.length === 0) continue;
+
+        const runtimeIds = objs.map(o => o.id);
+        if (runtimeIds.length === 0) continue;
+
+        const objectProps = await API.viewer.getObjectProperties(modelId, runtimeIds);
+        console.log("getObjectProperties for model", modelId, objectProps);
+
+        for (const obj of objectProps) {
           const psets = obj.properties || [];
 
           // Find Pset "MMI_AVINOR"
           const mmiSet = psets.find(ps => ps.set === "MMI_AVINOR");
           if (!mmiSet || !mmiSet.properties) continue;
 
-          // Find property where name is "01_MMI" or "01_MMI" (ignore spaces)
+          // Find property "01_MMI" (normalize spaces in the name just in case)
           const mmiProp = mmiSet.properties.find(p => {
             const normalized = (p.name || "").replace(/\s+/g, "");
             return normalized === "01_MMI";
           });
 
-          if (
-            !mmiProp ||
-            mmiProp.value === null ||
-            mmiProp.value === undefined ||
-            mmiProp.value === ""
-          ) {
+          if (!mmiProp || mmiProp.value === null || mmiProp.value === undefined || mmiProp.value === "") {
             continue;
           }
 
           const val = String(mmiProp.value).trim();
           if (!val) continue;
 
+          // Count the value (100, 200, 300, 400, ...)
           counts[val] = (counts[val] || 0) + 1;
         }
       }
@@ -150,7 +157,7 @@
 
       if (labels.length === 0) {
         document.getElementById("status").textContent =
-          "Her er det en feil.";
+          "Fant ingen verdier for 01_MMI i MMI_AVINOR på de lastede modellene.";
         return;
       }
 
@@ -161,7 +168,7 @@
           datasets: [
             {
               data: data
-              // default Chart.js colours
+              // Let Chart.js choose default colours
             }
           ]
         },
@@ -199,14 +206,12 @@
         renderPieChart(counts);
       } catch (err) {
         console.error(err);
-        errorEl.textContent = "Feil ved lesing av MMI-data: " + err.message;
+        errorEl.textContent = "Feil ved lesing av MMI-data: " + (err.message || err);
         statusEl.textContent = "Kunne ikke oppdatere diagram.";
       }
     }
 
-    document
-      .getElementById("reloadButton")
-      .addEventListener("click", loadChart);
+    document.getElementById("reloadButton").addEventListener("click", loadChart);
 
     (async () => {
       try {
@@ -215,11 +220,10 @@
       } catch (err) {
         console.error(err);
         document.getElementById("error").textContent =
-          "Klarte ikke å koble til Workspace API: " + err.message;
+          "Klarte ikke å koble til Workspace API: " + (err.message || err);
         document.getElementById("status").textContent = "Feil.";
       }
     })();
   </script>
 </body>
 </html>
-
