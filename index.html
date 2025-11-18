@@ -62,7 +62,7 @@
 </head>
 <body>
   <header>
-    <div>MMI Pie Chart (01_MMI)</div>
+    <div>MMI Pie Chart (01_MMI fra MMI_AVINOR)</div>
     <button id="reloadButton">Reload from Viewer</button>
   </header>
   <main>
@@ -88,17 +88,15 @@
     }
 
     /**
-     * Reads all loaded objects and counts 01_MMI values in Pset AVINOR (or Pset named "01_MMI").
+     * Reads all loaded objects and counts 01_MMI values
+     * in property set "MMI_AVINOR".
      */
     async function getMmiCounts() {
       if (!API) {
         throw new Error("API not connected yet.");
       }
 
-      // Get all objects in loaded models
       const modelObjectsList = await API.viewer.getObjects();
-      // modelObjectsList: ModelObjects[] => { modelId, objects: ObjectProperties[] }
-
       const counts = {}; // { value: number }
 
       for (const modelObjects of modelObjectsList) {
@@ -106,15 +104,12 @@
         for (const obj of objs) {
           const psets = obj.properties || [];
 
-          // Try Pset "AVINOR" first, then fall back to Pset named "01_MMI"
-          const avinorSet =
-            psets.find(ps => ps.set === "AVINOR") ||
-            psets.find(ps => ps.set === "01_MMI");
+          // 🔹 NOW: look specifically for Pset "MMI_AVINOR"
+          const mmiSet = psets.find(ps => ps.set === "MMI_AVINOR");
+          if (!mmiSet || !mmiSet.properties) continue;
 
-          if (!avinorSet || !avinorSet.properties) continue;
-
-          // Find property named "01_MMI"
-          const mmiProp = avinorSet.properties.find(p => p.name === "01_MMI");
+          // Property is "01_MMI"
+          const mmiProp = mmiSet.properties.find(p => p.name === "01_MMI");
           if (!mmiProp || mmiProp.value === null || mmiProp.value === undefined || mmiProp.value === "") {
             continue;
           }
@@ -141,7 +136,7 @@
 
       if (labels.length === 0) {
         document.getElementById("status").textContent =
-          "No 01_MMI values found in the loaded model(s).";
+          "No 01_MMI values found in MMI_AVINOR on the loaded model(s).";
         return;
       }
 
@@ -152,7 +147,7 @@
           datasets: [
             {
               data: data
-              // Colors are left for Chart.js defaults to handle
+              // Let Chart.js pick default colours
             }
           ]
         },
@@ -175,14 +170,14 @@
       });
 
       document.getElementById("status").textContent =
-        "MMI-fordeling (basert på 01_MMI i AVINOR Pset).";
+        "MMI-fordeling basert på 01_MMI i MMI_AVINOR.";
     }
 
     async function loadChart() {
       const statusEl = document.getElementById("status");
       const errorEl = document.getElementById("error");
       errorEl.textContent = "";
-      statusEl.textContent = "Henter objekter og leser 01_MMI…";
+      statusEl.textContent = "Henter objekter og leser 01_MMI fra MMI_AVINOR…";
 
       try {
         const counts = await getMmiCounts();
