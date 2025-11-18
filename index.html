@@ -64,20 +64,6 @@
       width: 100%;
       height: auto;
     }
-    details {
-      font-size: 12px;
-      border-top: 1px solid #eee;
-      padding-top: 4px;
-    }
-    details summary {
-      cursor: pointer;
-      font-weight: 500;
-    }
-    pre {
-      white-space: pre-wrap;
-      word-break: break-word;
-      margin: 4px 0 0 0;
-    }
   </style>
 </head>
 <body>
@@ -91,15 +77,14 @@
       <canvas id="mmiChart"></canvas>
     </div>
     <div id="error"></div>
-    <details>
-      <summary>Debug (MMI property sets / properties)</summary>
-      <pre id="debug"></pre>
-    </details>
   </main>
 
   <script>
     let API = null;
     let chart = null;
+
+    // Values we care about
+    const VALID_MMI_VALUES = [100, 200, 300, 400];
 
     function normalizeName(name) {
       return (name || "")
@@ -121,21 +106,24 @@
     }
 
     /**
-     * Reads all loaded objects and counts values of:
-     *  - Property set: name contains "MMI_AVINOR" (normalized)
-     *  - Property name: normalized name === "01_MMI"
+     * Reads all loaded objects and counts ONLY these values:
+     *  - Pset name: "MMI_AVINOR"
+     *  - Property name: "01_MMI"
+     *  - Values: 100, 200, 300, 400
      */
     async function getMmiCounts() {
       if (!API) throw new Error("API not connected yet.");
 
-      const debugLines = [];
-      const debugSets = new Set();
-      const debugProps = new Set();
-
       const modelObjectsList = await API.viewer.getObjects();
       console.log("getObjects() →", modelObjectsList);
 
-      const counts = {};
+      // Initialize counts for fixed values so they always appear
+      const counts = {
+        100: 0,
+        200: 0,
+        300: 0,
+        400: 0
+      };
 
       for (const modelObjects of modelObjectsList) {
         const modelId =
@@ -158,143 +146,12 @@
           const psets = obj.properties || [];
 
           for (const pset of psets) {
-            const rawSetName = pset.set || "";
-            const nSet = normalizeName(rawSetName);
-
-            // collect debug of any set that contains 'MMI'
-            if (nSet.includes("MMI")) {
-              debugSets.add(rawSetName);
-            }
-
-            // we only care about sets that look like MMI_AVINOR
-            if (!nSet.includes("MMI_AVINOR")) continue;
+            const setName = pset.set || "";
+            if (normalizeName(setName) !== "MMI_AVINOR") continue;
 
             const props = pset.properties || [];
             for (const p of props) {
-              const rawPropName = p.name || "";
-              const nProp = normalizeName(rawPropName);
+              const propName = p.name || "";
+              if (normalizeName(propName) !== "01_MMI") continue;
 
-              // debug any prop that contains 'MMI'
-              if (nProp.includes("MMI")) {
-                debugProps.add(`${rawSetName} :: ${rawPropName}`);
-              }
-
-              // our target property
-              if (nProp === "01_MMI") {
-                const val = (p.value ?? "").toString().trim();
-                if (!val) continue;
-                counts[val] = (counts[val] || 0) + 1;
-              }
-            }
-          }
-        }
-      }
-
-      // Write debug info
-      debugLines.push("Property sets containing 'MMI':");
-      if (debugSets.size === 0) {
-        debugLines.push("  (none found)");
-      } else {
-        for (const s of debugSets) debugLines.push("  - " + s);
-      }
-
-      debugLines.push("\nProperties containing 'MMI':");
-      if (debugProps.size === 0) {
-        debugLines.push("  (none found)");
-      } else {
-        let i = 0;
-        for (const p of debugProps) {
-          debugLines.push("  - " + p);
-          if (++i >= 40) { // don't spam too much
-            debugLines.push("  ... (truncated)");
-            break;
-          }
-        }
-      }
-
-      document.getElementById("debug").textContent = debugLines.join("\n");
-      console.log("MMI counts:", counts);
-      return counts;
-    }
-
-    function renderPieChart(counts) {
-      const ctx = document.getElementById("mmiChart").getContext("2d");
-      const labels = Object.keys(counts);
-      const data = labels.map(l => counts[l]);
-
-      if (chart) chart.destroy();
-
-      if (labels.length === 0) {
-        document.getElementById("status").textContent =
-          "Fant ingen verdier for 01_MMI i MMI_AVINOR på de lastede modellene.";
-        return;
-      }
-
-      chart = new Chart(ctx, {
-        type: "pie",
-        data: {
-          labels,
-          datasets: [
-            {
-              data
-              // default Chart.js colors
-            }
-          ]
-        },
-        options: {
-          plugins: {
-            legend: {
-              position: "bottom"
-            },
-            tooltip: {
-              callbacks: {
-                label: function (context) {
-                  const label = context.label || "";
-                  const value = context.parsed || 0;
-                  return `${label}: ${value} objekter`;
-                }
-              }
-            }
-          }
-        }
-      });
-
-      document.getElementById("status").textContent =
-        "MMI-fordeling basert på 01_MMI i MMI_AVINOR.";
-    }
-
-    async function loadChart() {
-      const statusEl = document.getElementById("status");
-      const errorEl = document.getElementById("error");
-      errorEl.textContent = "";
-      statusEl.textContent = "Henter objekter og leser 01_MMI fra MMI_AVINOR…";
-
-      try {
-        const counts = await getMmiCounts();
-        renderPieChart(counts);
-      } catch (err) {
-        console.error(err);
-        errorEl.textContent =
-          "Feil ved lesing av MMI-data: " + (err.message || err);
-        statusEl.textContent = "Kunne ikke oppdatere diagram.";
-      }
-    }
-
-    document
-      .getElementById("reloadButton")
-      .addEventListener("click", loadChart);
-
-    (async () => {
-      try {
-        await connectToWorkspace();
-        await loadChart();
-      } catch (err) {
-        console.error(err);
-        document.getElementById("error").textContent =
-          "Klarte ikke å koble til Workspace API: " + (err.message || err);
-        document.getElementById("status").textContent = "Feil.";
-      }
-    })();
-  </script>
-</body>
-</html>
+              // Read numeric valu
