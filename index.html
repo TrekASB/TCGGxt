@@ -8,7 +8,7 @@
   <!-- Workspace API -->
   <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
 
-  <!-- Chart.js -->
+  <!-- Chart.js for the pie chart -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
   <style>
@@ -32,25 +32,31 @@
       flex: 1;
       display: flex;
       flex-direction: column;
-      align-items: center;
-      justify-content: center;
+      align-items: stretch;
+      justify-content: flex-start;
       padding: 12px;
       box-sizing: border-box;
+      gap: 8px;
     }
     #status {
       font-size: 13px;
-      margin-bottom: 8px;
       opacity: 0.9;
     }
     #error {
       color: #b00020;
       font-size: 13px;
-      margin-top: 4px;
     }
     #reloadButton {
       font-size: 13px;
       padding: 4px 8px;
       cursor: pointer;
+    }
+    #chartContainer {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 200px;
     }
     canvas {
       max-width: 480px;
@@ -62,12 +68,14 @@
 </head>
 <body>
   <header>
-    <div>MMI Pie Chart (01_MMI fra MMI_AVINOR)</div>
+    <div>MMI Pie Chart (01_MMI)</div>
     <button id="reloadButton">Reload from Viewer</button>
   </header>
   <main>
     <div id="status">Connecting to Trimble Connect…</div>
-    <canvas id="mmiChart"></canvas>
+    <div id="chartContainer">
+      <canvas id="mmiChart"></canvas>
+    </div>
     <div id="error"></div>
   </main>
 
@@ -75,7 +83,15 @@
     let API = null;
     let chart = null;
 
-    const VALID_MMI_VALUES = ["100", "200", "300", "400"];
+    // Values we care about
+    const VALID_MMI_VALUES = [100, 200, 300, 400];
+
+    function normalizeName(name) {
+      return (name || "")
+        .toString()
+        .toUpperCase()
+        .replace(/[\s\-]+/g, "_"); // spaces & dashes → "_"
+    }
 
     async function connectToWorkspace() {
       API = await TrimbleConnectWorkspace.connect(
@@ -90,18 +106,9 @@
     }
 
     /**
-     * Use ONLY viewer.getObjects(), and read properties directly from there.
-     * We expect structure:
-     *   obj.properties = [
-     *     {
-     *       set: "MMI_AVINOR",
-     *       properties: [
-     *         { name: "01_MMI", value: "400", ... },
-     *         ...
-     *       ]
-     *     },
-     *     ...
-     *   ]
+     * Reads all loaded objects and counts ONLY these values:
+     *  - Property name: "01_MMI" (any property set)
+     *  - Values: 100, 200, 300, 400
      */
     async function getMmiCounts() {
       if (!API) throw new Error("API not connected yet.");
@@ -109,37 +116,53 @@
       const modelObjectsList = await API.viewer.getObjects();
       console.log("getObjects() →", modelObjectsList);
 
-      // Initialize counts for fixed values
+      // Initialize counts for fixed values so they always exist
       const counts = {
-        "100": 0,
-        "200": 0,
-        "300": 0,
-        "400": 0
+        100: 0,
+        200: 0,
+        300: 0,
+        400: 0
       };
 
       for (const modelObjects of modelObjectsList) {
+        const modelId =
+          modelObjects.modelId ||
+          modelObjects.modelid ||
+          modelObjects["model Id"];
         const objs = modelObjects.objects || [];
 
-        for (const obj of objs) {
-          const psets = obj.properties || [];
-          for (const pset of psets) {
-            if (pset.set !== "01_MMI") continue;
+        if (!modelId || !objs.length) continue;
 
+        const runtimeIds = objs.map(o => o.id);
+        if (!runtimeIds.length) continue;
+
+        const objectPropsArray = await API.viewer.getObjectProperties(
+          modelId,
+          runtimeIds
+        );
+
+        for (const obj of objectPropsArray) {
+          const psets = obj.properties || [];
+
+          for (const pset of psets) {
             const props = pset.properties || [];
             for (const p of props) {
-              if (p.name !== "01_MMI") continue;
+              const propName = p.name || "";
 
-              // VALUE is IFCTEXT('400') in IFC → Trimble gives us plain "400"
-              const val = (p.value ?? "").toString().trim();
-              if (VALID_MMI_VALUES.includes(val)) {
-                counts[val] = (counts[val] || 0) + 1;
+              // Look for property "01_MMI" (normalised)
+              if (normalizeName(propName) !== "01_MMI") continue;
+
+              // Read numeric value and count only 100 / 200 / 300 / 400
+              const numVal = parseInt(p.value, 10);
+              if (VALID_MMI_VALUES.includes(numVal)) {
+                counts[numVal] = (counts[numVal] || 0) + 1;
               }
             }
           }
         }
       }
 
-      console.log("MMI counts:", counts);
+      console.log("MMI counts (100/200/300/400):", counts);
       return counts;
     }
 
@@ -149,10 +172,11 @@
       const labels = [];
       const data = [];
 
-      for (const val of VALID_MMI_VALUES) {
-        const c = counts[val] || 0;
+      // Only include slices with count > 0
+      for (const mmi of VALID_MMI_VALUES) {
+        const c = counts[mmi] || 0;
         if (c > 0) {
-          labels.push(val);
+          labels.push(String(mmi));
           data.push(c);
         }
       }
@@ -161,7 +185,7 @@
 
       if (labels.length === 0) {
         document.getElementById("status").textContent =
-          "Fant ingen verdier 100/200/300/400 for 01_MMI i MMI_AVINOR på de lastede modellene.";
+          "Fant ingen verdier 100/200/300/400 for 01_MMI på de lastede modellene.";
         return;
       }
 
@@ -172,7 +196,7 @@
           datasets: [
             {
               data
-              // default Chart.js colours
+              // Chart.js default colours
             }
           ]
         },
@@ -195,7 +219,7 @@
       });
 
       document.getElementById("status").textContent =
-        "MMI-fordeling (100/200/300/400) basert på 01_MMI i MMI_AVINOR.";
+        "MMI-fordeling (100/200/300/400) basert på 01_MMI.";
     }
 
     async function loadChart() {
@@ -203,7 +227,7 @@
       const errorEl = document.getElementById("error");
       errorEl.textContent = "";
       statusEl.textContent =
-        "Henter objekter og leser 01_MMI (100/200/300/400) fra MMI_AVINOR…";
+        "Henter objekter og leser 01_MMI (100/200/300/400)…";
 
       try {
         const counts = await getMmiCounts();
@@ -234,4 +258,3 @@
   </script>
 </body>
 </html>
-
