@@ -41,11 +41,6 @@
       cursor: pointer;
     }
 
-    header button:disabled {
-      cursor: not-allowed;
-      opacity: 0.5;
-    }
-
     main {
       flex: 1;
       display: flex;
@@ -80,19 +75,6 @@
       width: 100%;
       height: auto;
     }
-
-    #guidList {
-      font-size: 12px;
-      max-height: 200px;
-      overflow-y: auto;
-      border-top: 1px solid #ddd;
-      padding-top: 6px;
-    }
-
-    #guidList ol {
-      margin: 4px 0 0 18px;
-      padding: 0;
-    }
   </style>
 </head>
 <body>
@@ -100,7 +82,6 @@
     <div class="title">MMI-kakediagram (01_MMI)</div>
     <button id="reloadButton">Hent fra modell</button>
     <button id="colorizeButton">Fargelegg objekter</button>
-    <button id="exportButton" disabled>Eksporter GUID til CSV</button>
   </header>
 
   <main>
@@ -108,7 +89,6 @@
     <div id="chartContainer">
       <canvas id="mmiChart"></canvas>
     </div>
-    <div id="guidList"></div>
     <div id="error"></div>
   </main>
 
@@ -116,15 +96,9 @@
     let API = null;
     let chart = null;
 
+    // For fargelegging/isolering
     let lastSelectionByMmi = null;
-    let lastGuidsByMmi = null;
     let lastCounts = null;
-
-    let currentGuidExportData = {
-      label: null,
-      key: null,
-      guids: []
-    };
 
     const VALID_MMI_VALUES = [100, 200, 300, 350, 400];
     const NO_MMI_KEY = "noMmi";
@@ -159,64 +133,6 @@
       };
     }
 
-    // Rekursiv søkefunksjon – finn første streng som ser ut som IFC GUID
-    function findGuidDeep(node) {
-      if (!node || typeof node !== "object") return null;
-
-      const guidRegex = /[0-9A-Za-z_$]{22,36}/; // dekker IFC GUID-formater
-
-      for (const value of Object.values(node)) {
-        if (typeof value === "string") {
-          // hopp over veldig korte ting, sjekk bare litt lengre strenger
-          if (value.length >= 10) {
-            const match = value.match(guidRegex);
-            if (match) return match[0];
-          }
-        } else if (Array.isArray(value)) {
-          for (const item of value) {
-            const found = findGuidDeep(item);
-            if (found) return found;
-          }
-        } else if (typeof value === "object" && value !== null) {
-          const found = findGuidDeep(value);
-          if (found) return found;
-        }
-      }
-      return null;
-    }
-
-    // Hent GUID på en robust måte
-    function getGuidFromObject(obj) {
-      if (!obj) return "(ukjent GUID)";
-
-      // 1) Direkte felter vi kjenner til
-      const direct =
-        obj.guid ||
-        obj.ifcGuid ||
-        obj.ifc_guid ||
-        obj.GlobalId ||
-        obj.globalId;
-      if (direct) return String(direct);
-
-      // 2) Søk gjennom pset-struktur etter felt som heter noe med GUID
-      const psets = obj.properties || [];
-      for (const pset of psets) {
-        const props = pset.properties || [];
-        for (const p of props) {
-          const n = normalizeName(p.name);
-          if (n.includes("GLOBALID") || n.includes("IFC") && n.includes("GUID") || n === "GUID" || n.includes("GUID")) {
-            if (p.value) return String(p.value);
-          }
-        }
-      }
-
-      // 3) Fallback: rekursiv søk i hele objektet etter noe som ser ut som en IFC GUID
-      const deep = findGuidDeep(obj);
-      if (deep) return String(deep);
-
-      return "(ukjent GUID)";
-    }
-
     async function connectToWorkspace() {
       API = await TrimbleConnectWorkspace.connect(
         window.parent,
@@ -228,6 +144,7 @@
       document.getElementById("status").textContent = "Tilkoblet. Klar.";
     }
 
+    // Leser 01_MMI og bygger counts + selectionByMmi
     async function getMmiData() {
       if (!API) throw new Error("API ikke tilkoblet.");
 
@@ -252,15 +169,6 @@
         [NO_MMI_KEY]: {}
       };
 
-      const guidsByMmi = {
-        100: [],
-        200: [],
-        300: [],
-        350: [],
-        400: [],
-        [NO_MMI_KEY]: []
-      };
-
       for (const modelObjects of modelObjectsList) {
         const modelId =
           modelObjects.modelId ||
@@ -282,10 +190,9 @@
 
         for (let i = 0; i < objectPropsArray.length; i++) {
           const obj = objectPropsArray[i];
-          const runtimeId = runtimeIds[i]; // viktig: bruk runtimeId videre
+          const runtimeId = runtimeIds[i];
 
           const psets = obj.properties || [];
-          const guid = getGuidFromObject(obj);
           let assignedMmi = false;
 
           for (const pset of psets) {
@@ -304,7 +211,6 @@
                 if (!perModel[modelId]) perModel[modelId] = [];
                 perModel[modelId].push(runtimeId);
 
-                guidsByMmi[numVal].push(guid);
                 assignedMmi = true;
               }
               break;
@@ -317,17 +223,14 @@
             const perModelNoMmi = selectionByMmi[NO_MMI_KEY];
             if (!perModelNoMmi[modelId]) perModelNoMmi[modelId] = [];
             perModelNoMmi[modelId].push(runtimeId);
-
-            guidsByMmi[NO_MMI_KEY].push(guid);
           }
         }
       }
 
       console.log("MMI counts:", counts);
       console.log("MMI selectionByMmi:", selectionByMmi);
-      console.log("MMI guidsByMmi:", guidsByMmi);
 
-      return { counts, selectionByMmi, guidsByMmi };
+      return { counts, selectionByMmi };
     }
 
     async function applyMmiColors(selectionByMmi) {
@@ -375,6 +278,7 @@
       }
     }
 
+    // Isoler valgt MMI-gruppe ved klikk på kaken
     async function isolateMmiGroup(key, labelText) {
       if (!API) throw new Error("API ikke tilkoblet.");
 
@@ -417,73 +321,6 @@
       }
     }
 
-    function showGuidList(labelText, guidArray, key) {
-      const container = document.getElementById("guidList");
-      const exportBtn = document.getElementById("exportButton");
-
-      if (!guidArray || !guidArray.length) {
-        container.innerHTML =
-          "<strong>Ingen GUID-er funnet for " + labelText + ".</strong>";
-        currentGuidExportData = { label: null, key: null, guids: [] };
-        exportBtn.disabled = true;
-        return;
-      }
-
-      let html =
-        "<strong>IFC GUID-er for " +
-        labelText +
-        ":</strong><br/><small>Totalt " +
-        guidArray.length +
-        " objekter</small><ol>";
-
-      for (const g of guidArray) {
-        html += "<li>" + (g || "(mangler GUID)") + "</li>";
-      }
-      html += "</ol>";
-
-      container.innerHTML = html;
-
-      currentGuidExportData = {
-        label: labelText,
-        key: key,
-        guids: guidArray.slice()
-      };
-      exportBtn.disabled = false;
-    }
-
-    function exportGuidsToCsv() {
-      const { label, guids } = currentGuidExportData;
-      if (!label || !guids || !guids.length) {
-        alert("Ingen GUID-liste klar for eksport. Klikk på en kakeskive først.");
-        return;
-      }
-
-      const rows = ["MMIgruppe;IFC_GUID"];
-      for (const g of guids) {
-        const guid = g || "";
-        rows.push(`${label};${guid}`);
-      }
-
-      const csvContent = rows.join("\r\n");
-      const blob = new Blob([csvContent], {
-        type: "text/csv;charset=utf-8;"
-      });
-
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-
-      const safeLabel = label
-        .toString()
-        .replace(/[^0-9A-Za-z_æøåÆØÅ\-]+/g, "_");
-
-      a.href = url;
-      a.download = `MMI_${safeLabel}_GUIDer.csv`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }
-
     function renderPieChart(counts) {
       const ctx = document.getElementById("mmiChart").getContext("2d");
 
@@ -495,13 +332,7 @@
       for (const key of ALL_GROUP_KEYS) {
         const c = counts[key] || 0;
         if (c > 0) {
-          let label;
-          if (key === NO_MMI_KEY) {
-            label = "Uten MMI";
-          } else {
-            label = String(key);
-          }
-
+          const label = key === NO_MMI_KEY ? "Uten MMI" : String(key);
           labels.push(label);
           data.push(c);
 
@@ -536,17 +367,8 @@
             if (!activeEls || !activeEls.length) return;
             const idx = activeEls[0].index;
             const label = labels[idx];
-
-            const key =
-              label === "Uten MMI" ? NO_MMI_KEY : parseInt(label, 10);
-
+            const key = label === "Uten MMI" ? NO_MMI_KEY : parseInt(label, 10);
             await isolateMmiGroup(key, label);
-
-            if (lastGuidsByMmi && lastGuidsByMmi[key]) {
-              showGuidList(label, lastGuidsByMmi[key], key);
-            } else {
-              showGuidList(label, [], key);
-            }
           },
           plugins: {
             tooltip: {
@@ -588,28 +410,21 @@
 
       document.getElementById("status").textContent =
         "MMI-fordeling (100/200/300/350/400) + objekter uten MMI, basert på 01_MMI. " +
-        "Klikk på en kakeskive for å isolere objekter, se IFC GUID-liste og eksportere til CSV. " +
+        "Klikk på en kakeskive for å isolere objekter. " +
         "Bruk «Fargelegg objekter» for å oppdatere farger i modellen.";
     }
 
     async function loadChart() {
       const statusEl = document.getElementById("status");
       const errorEl = document.getElementById("error");
-      const guidEl = document.getElementById("guidList");
-      const exportBtn = document.getElementById("exportButton");
 
       errorEl.textContent = "";
-      guidEl.innerHTML = "";
-      exportBtn.disabled = true;
-      currentGuidExportData = { label: null, key: null, guids: [] };
-
       statusEl.textContent =
         "Henter objekter og leser 01_MMI (100/200/300/350/400) + objekter uten MMI…";
 
       try {
-        const { counts, selectionByMmi, guidsByMmi } = await getMmiData();
+        const { counts, selectionByMmi } = await getMmiData();
         lastSelectionByMmi = selectionByMmi;
-        lastGuidsByMmi = guidsByMmi;
         lastCounts = counts;
 
         renderPieChart(counts);
@@ -633,8 +448,6 @@
       document.getElementById("status").textContent =
         "Fargelegging oppdatert basert på sist innleste MMI-data.";
     });
-
-    document.getElementById("exportButton").addEventListener("click", exportGuidsToCsv);
 
     (async () => {
       try {
