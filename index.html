@@ -116,12 +116,10 @@
     let API = null;
     let chart = null;
 
-    // Siste lagrede utvalg
     let lastSelectionByMmi = null;
     let lastGuidsByMmi = null;
     let lastCounts = null;
 
-    // Data for CSV-eksport (sist valgte gruppe)
     let currentGuidExportData = {
       label: null,
       key: null,
@@ -132,12 +130,12 @@
     const NO_MMI_KEY = "noMmi";
 
     const MMI_COLORS = {
-      "100": "rgb(190, 40, 35)",    // 100
-      "200": "rgb(230, 150, 55)",   // 200
-      "300": "rgb(250, 240, 80)",   // 300
-      "350": "rgb(185, 175, 60)",   // 350
-      "400": "rgb(55, 130, 70)",    // 400
-      "noMmi": "rgb(254, 2, 225)"   // uten MMI
+      "100": "rgb(190, 40, 35)",
+      "200": "rgb(230, 150, 55)",
+      "300": "rgb(250, 240, 80)",
+      "350": "rgb(185, 175, 60)",
+      "400": "rgb(55, 130, 70)",
+      "noMmi": "rgb(254, 2, 225)"
     };
 
     const ALL_GROUP_KEYS = [...VALID_MMI_VALUES, NO_MMI_KEY];
@@ -161,8 +159,37 @@
       };
     }
 
+    // Rekursiv søkefunksjon – finn første streng som ser ut som IFC GUID
+    function findGuidDeep(node) {
+      if (!node || typeof node !== "object") return null;
+
+      const guidRegex = /[0-9A-Za-z_$]{22,36}/; // dekker IFC GUID-formater
+
+      for (const value of Object.values(node)) {
+        if (typeof value === "string") {
+          // hopp over veldig korte ting, sjekk bare litt lengre strenger
+          if (value.length >= 10) {
+            const match = value.match(guidRegex);
+            if (match) return match[0];
+          }
+        } else if (Array.isArray(value)) {
+          for (const item of value) {
+            const found = findGuidDeep(item);
+            if (found) return found;
+          }
+        } else if (typeof value === "object" && value !== null) {
+          const found = findGuidDeep(value);
+          if (found) return found;
+        }
+      }
+      return null;
+    }
+
+    // Hent GUID på en robust måte
     function getGuidFromObject(obj) {
       if (!obj) return "(ukjent GUID)";
+
+      // 1) Direkte felter vi kjenner til
       const direct =
         obj.guid ||
         obj.ifcGuid ||
@@ -171,16 +198,21 @@
         obj.globalId;
       if (direct) return String(direct);
 
+      // 2) Søk gjennom pset-struktur etter felt som heter noe med GUID
       const psets = obj.properties || [];
       for (const pset of psets) {
         const props = pset.properties || [];
         for (const p of props) {
           const n = normalizeName(p.name);
-          if (n === "GLOBALID" || n === "IFC_GUID" || n === "IFCGUID") {
-            return String(p.value);
+          if (n.includes("GLOBALID") || n.includes("IFC") && n.includes("GUID") || n === "GUID" || n.includes("GUID")) {
+            if (p.value) return String(p.value);
           }
         }
       }
+
+      // 3) Fallback: rekursiv søk i hele objektet etter noe som ser ut som en IFC GUID
+      const deep = findGuidDeep(obj);
+      if (deep) return String(deep);
 
       return "(ukjent GUID)";
     }
@@ -246,7 +278,12 @@
           runtimeIds
         );
 
-        for (const obj of objectPropsArray) {
+        if (!Array.isArray(objectPropsArray)) continue;
+
+        for (let i = 0; i < objectPropsArray.length; i++) {
+          const obj = objectPropsArray[i];
+          const runtimeId = runtimeIds[i]; // viktig: bruk runtimeId videre
+
           const psets = obj.properties || [];
           const guid = getGuidFromObject(obj);
           let assignedMmi = false;
@@ -265,24 +302,21 @@
 
                 const perModel = selectionByMmi[numVal];
                 if (!perModel[modelId]) perModel[modelId] = [];
-                perModel[modelId].push(obj.id); // runtimeId
+                perModel[modelId].push(runtimeId);
 
                 guidsByMmi[numVal].push(guid);
                 assignedMmi = true;
               }
-
-              // bryt ut etter første 01_MMI
               break;
             }
           }
 
-          // Objekter uten gyldig MMI-verdi
           if (!assignedMmi) {
             counts[NO_MMI_KEY] = (counts[NO_MMI_KEY] || 0) + 1;
 
             const perModelNoMmi = selectionByMmi[NO_MMI_KEY];
             if (!perModelNoMmi[modelId]) perModelNoMmi[modelId] = [];
-            perModelNoMmi[modelId].push(obj.id);
+            perModelNoMmi[modelId].push(runtimeId);
 
             guidsByMmi[NO_MMI_KEY].push(guid);
           }
@@ -409,7 +443,6 @@
 
       container.innerHTML = html;
 
-      // Oppdater eksport-data
       currentGuidExportData = {
         label: labelText,
         key: key,
@@ -425,7 +458,6 @@
         return;
       }
 
-      // Header
       const rows = ["MMIgruppe;IFC_GUID"];
       for (const g of guids) {
         const guid = g || "";
@@ -458,7 +490,6 @@
       const labels = [];
       const data = [];
       const backgroundColors = [];
-
       let total = 0;
 
       for (const key of ALL_GROUP_KEYS) {
@@ -557,7 +588,7 @@
 
       document.getElementById("status").textContent =
         "MMI-fordeling (100/200/300/350/400) + objekter uten MMI, basert på 01_MMI. " +
-        "Klikk på en kakeskive for å isolere objekter, se IFC GUID-liste og eventuelt eksportere til CSV. " +
+        "Klikk på en kakeskive for å isolere objekter, se IFC GUID-liste og eksportere til CSV. " +
         "Bruk «Fargelegg objekter» for å oppdatere farger i modellen.";
     }
 
