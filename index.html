@@ -102,6 +102,15 @@
     // Verdier vi bryr oss om
     const VALID_MMI_VALUES = [100, 200, 300, 350, 400];
 
+    // Farger (brukes både i diagram og i modellen)
+    const MMI_COLORS = {
+      "100": "rgb(190, 40, 35)",   // 100
+      "200": "rgb(230, 150, 55)",  // 200
+      "300": "rgb(250, 240, 80)",  // 300
+      "350": "rgb(185, 175, 60)",  // 350
+      "400": "rgb(55, 130, 70)"    // 400
+    };
+
     function normalizeName(name) {
       return (name || "")
         .toString()
@@ -400,4 +409,3 @@
   </script>
 </body>
 </html>
-
