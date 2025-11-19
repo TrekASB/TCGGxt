@@ -102,14 +102,21 @@
     // Verdier vi bryr oss om
     const VALID_MMI_VALUES = [100, 200, 300, 350, 400];
 
+    // Egen nøkkel for objekter uten MMI-verdi
+    const NO_MMI_KEY = "noMmi";
+
     // Farger (brukes både i diagram og i modellen)
     const MMI_COLORS = {
-      "100": "rgb(190, 40, 35)",   // 100
-      "200": "rgb(230, 150, 55)",  // 200
-      "300": "rgb(250, 240, 80)",  // 300
-      "350": "rgb(185, 175, 60)",  // 350
-      "400": "rgb(55, 130, 70)"    // 400
+      "100": "rgb(190, 40, 35)",    // 100
+      "200": "rgb(230, 150, 55)",   // 200
+      "300": "rgb(250, 240, 80)",   // 300
+      "350": "rgb(185, 175, 60)",   // 350
+      "400": "rgb(55, 130, 70)",    // 400
+      "noMmi": "rgb(254, 2, 225)"   // objekter uten MMI-verdi
     };
+
+    // Alle grupper (inkludert "uten MMI")
+    const ALL_GROUP_KEYS = [...VALID_MMI_VALUES, NO_MMI_KEY];
 
     function normalizeName(name) {
       return (name || "")
@@ -144,10 +151,11 @@
 
     /**
      * Leser alle lastede objekter og henter:
-     *  - counts: antall objekter per MMI-verdi
-     *  - selectionByMmi: { MMI → { modelId → [runtimeIds] } }
+     *  - counts: antall objekter per MMI-verdi + uten MMI
+     *  - selectionByMmi: { key → { modelId → [runtimeIds] } }
      *
      * Ser etter egenskap med navn "01_MMI" i valgfritt Pset.
+     * Objekter uten gyldig MMI-verdi havner i "noMmi".
      */
     async function getMmiData() {
       if (!API) throw new Error("API ikke tilkoblet.");
@@ -161,7 +169,8 @@
         200: 0,
         300: 0,
         350: 0,
-        400: 0
+        400: 0,
+        [NO_MMI_KEY]: 0
       };
 
       // For fargelegging: per MMI → per modelId → liste med runtimeIds
@@ -170,7 +179,8 @@
         200: {},
         300: {},
         350: {},
-        400: {}
+        400: {},
+        [NO_MMI_KEY]: {}
       };
 
       for (const modelObjects of modelObjectsList) {
@@ -192,10 +202,11 @@
 
         for (const obj of objectPropsArray) {
           const psets = obj.properties || [];
-          let handled = false;
+
+          let assignedMmi = false; // true hvis objektet havner i 100/200/300/350/400
 
           for (const pset of psets) {
-            if (handled) break;
+            if (assignedMmi) break;
             const props = pset.properties || [];
             for (const p of props) {
               const propName = p.name || "";
@@ -204,6 +215,7 @@
               if (normalizeName(propName) !== "01_MMI") continue;
 
               const numVal = parseInt(p.value, 10);
+
               if (VALID_MMI_VALUES.includes(numVal)) {
                 counts[numVal] = (counts[numVal] || 0) + 1;
 
@@ -212,11 +224,24 @@
                   perModel[modelId] = [];
                 }
                 perModel[modelId].push(obj.id); // runtimeId
+
+                assignedMmi = true;
               }
 
-              handled = true; // vi har håndtert denne 01_MMI-en
+              // Vi bryter uansett ut etter første 01_MMI
               break;
             }
+          }
+
+          // Hvis objektet ikke fikk gyldig MMI-verdi → inn i "uten MMI"
+          if (!assignedMmi) {
+            counts[NO_MMI_KEY] = (counts[NO_MMI_KEY] || 0) + 1;
+
+            const perModelNoMmi = selectionByMmi[NO_MMI_KEY];
+            if (!perModelNoMmi[modelId]) {
+              perModelNoMmi[modelId] = [];
+            }
+            perModelNoMmi[modelId].push(obj.id);
           }
         }
       }
@@ -226,7 +251,7 @@
       return { counts, selectionByMmi };
     }
 
-    // Fargelegg objekter i viseren etter MMI-verdi
+    // Fargelegg objekter i viseren etter MMI-verdi (inkl. uten MMI)
     async function applyMmiColors(selectionByMmi) {
       if (!API) throw new Error("API ikke tilkoblet.");
 
@@ -237,9 +262,9 @@
         // Reset farger først
         await API.viewer.setObjectState(undefined, { color: "reset" });
 
-        // Fargelegg per MMI-gruppe
-        for (const mmi of VALID_MMI_VALUES) {
-          const perModel = selectionByMmi[mmi];
+        // Fargelegg per MMI-gruppe + uten MMI
+        for (const key of ALL_GROUP_KEYS) {
+          const perModel = selectionByMmi[key];
           if (!perModel) continue;
 
           const modelObjectIds = [];
@@ -255,7 +280,7 @@
 
           if (!modelObjectIds.length) continue;
 
-          const colorString = MMI_COLORS[String(mmi)];
+          const colorString = MMI_COLORS[String(key)] || "rgb(0,0,0)";
           const rgba = parseRgbToRgba(colorString);
           if (!rgba) continue;
 
@@ -274,7 +299,7 @@
       }
     }
 
-    // Tegner kakediagram og viser prosent
+    // Tegner kakediagram og viser prosent + antall i parentes
     function renderPieChart(counts) {
       const ctx = document.getElementById("mmiChart").getContext("2d");
 
@@ -284,13 +309,22 @@
 
       let total = 0;
 
-      for (const mmi of VALID_MMI_VALUES) {
-        const c = counts[mmi] || 0;
+      for (const key of ALL_GROUP_KEYS) {
+        const c = counts[key] || 0;
         if (c > 0) {
-          const label = String(mmi);
+          let label;
+          if (key === NO_MMI_KEY) {
+            label = "Uten MMI";
+          } else {
+            label = String(key);
+          }
+
           labels.push(label);
           data.push(c);
-          backgroundColors.push(MMI_COLORS[label] || "rgba(0,0,0,0.1)");
+
+          const color = MMI_COLORS[String(key)] || "rgba(0,0,0,0.1)";
+          backgroundColors.push(color);
+
           total += c;
         }
       }
@@ -299,7 +333,7 @@
 
       if (labels.length === 0) {
         document.getElementById("status").textContent =
-          "Fant ingen verdier 100/200/300/350/400 for 01_MMI på de lastede modellene.";
+          "Fant ingen objekter i modellen.";
         return;
       }
 
@@ -324,7 +358,8 @@
                   const percent = total > 0
                     ? ((value / total) * 100).toFixed(1)
                     : 0;
-                  return `${label}: ${value} objekter (${percent} %)`;
+                  // Format: 89.8 % (452 objekter)
+                  return `${label}: ${percent} % (${value} objekter)`;
                 }
               }
             },
@@ -339,8 +374,9 @@
                     const percent = total > 0
                       ? ((value / total) * 100).toFixed(1)
                       : 0;
+                    // Format i legend: 100 – 89.8 % (452 objekter)
                     return {
-                      text: `${label} – ${percent} %`,
+                      text: `${label} – ${percent} % (${value} objekter)`,
                       fillStyle: dataSet.backgroundColor[i],
                       strokeStyle: dataSet.backgroundColor[i],
                       lineWidth: 1,
@@ -356,7 +392,7 @@
       });
 
       document.getElementById("status").textContent =
-        "MMI-fordeling (100/200/300/350/400) basert på 01_MMI. " +
+        "MMI-fordeling (100/200/300/350/400) + objekter uten MMI, basert på 01_MMI. " +
         "Bruk «Fargelegg objekter» for å oppdatere farger i modellen.";
     }
 
@@ -365,7 +401,7 @@
       const errorEl = document.getElementById("error");
       errorEl.textContent = "";
       statusEl.textContent =
-        "Henter objekter og leser 01_MMI (100/200/300/350/400)…";
+        "Henter objekter og leser 01_MMI (100/200/300/350/400) + objekter uten MMI…";
 
       try {
         const { counts, selectionByMmi } = await getMmiData();
